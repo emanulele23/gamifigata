@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gamifigata</title>
+    <style>
+        /* General Styles */
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        header {
+            background: url('https://via.placeholder.com/1920x600') no-repeat center center/cover;
+            color: white;
+            text-align: center;
+            padding: 150px 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 20px;
+        }
+
+        p {
+            font-size: 1.2rem;
+        }
+
+        button {
+            background: #ff6f61;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1rem;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background 0.3s ease;
+        }
+
+        button:hover {
+            background: #e65c4d;
+        }
+
+        section {
+            padding: 60px 0;
+        }
+
+        .about, .features, .testimonials {
+            background: #f9f9f9;
+        }
+
+        .features-card {
+            background: white;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .testimonials {
+            background: #fff;
+        }
+
+        .testimonial-box {
+            border-left: 5px solid #ff6f61;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        footer {
+            background: #333;
+            color: white;
+            text-align: center;
+            padding: 20px 0;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2.5rem;
+            }
+            button {
+                font-size: 0.9rem;
+                padding: 12px 25px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Hero Section -->
+    <header>
+        <div class="container">
+            <h1>Gamifigata</h1>
+            <p>Crea videogiochi personalizzati per il tuo business</p>
+            <button>Contattaci Ora</button>
+        </div>
+    </header>
+
+    <!-- About Us Section -->
+    <section class="about">
+        <div class="container">
+            <h2>Chi Siamo</h2>
+            <p>Siamo una squadra di esperti nel campo della gamification e del design di videogiochi personalizzati per aziende. La nostra missione è aiutare le aziende a coinvolgere i loro dipendenti o clienti attraverso esperienze ludiche uniche.</p>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features">
+        <div class="container">
+            <h2>Cosa Offriamo</h2>
+            <div class="features-grid">
+                <div class="features-card">
+                    <h3>Personalizzazione</h3>
+                    <p>Creiamo giochi adatti alle esigenze specifiche del tuo business.</p>
+                </div>
+                <div class="features-card">
+                    <h3>Engagement</h3>
+                    <p>Motiva i tuoi dipendenti o clienti con soluzioni innovative.</p>
+                </div>
+                <div class="features-card">
+                    <h3>Branding</h3>
+                    <p>Incorporiamo il tuo marchio nei giochi per rafforzarne la visibilità.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials Section -->
+    <section class="testimonials">
+        <div class="container">
+            <h2>Cosa Dicono i Nostri Clienti</h2>
+            <div class="testimonial-box">
+                <p>"Gamifigata ha trasformato il nostro team building in un'esperienza divertente e coinvolgente!"</p>
+                <cite>- Marco Rossi, CEO di XYZ Company</cite>
+            </div>
+            <div class="testimonial-box">
+                <p>"I nostri clienti amano i giochi personalizzati che abbiamo creato con Gamifigata."</p>
+                <cite>- Anna Bianchi, Marketing Manager di ABC Corp</cite>
+            </div>
+        </div>
+    </section>
+
+    <!-- Contact Section -->
+    <section>
+        <div class="container">
+            <h2>Contattaci</h2>
+            <form action="#" method="POST">
+                <input type="text" placeholder="Nome" required><br><br>
+                <input type="email" placeholder="Email" required><br><br>
+                <textarea placeholder="Messaggio" required></textarea><br><br>
+                <button type="submit">Invia</button>
+            </form>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2023 Gamifigata. Tutti i diritti riservati.</p>
+    </footer>
+
+</body>
+</html>
