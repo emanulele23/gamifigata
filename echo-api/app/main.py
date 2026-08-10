@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -21,6 +21,7 @@ from app.fish import speech_to_text, text_to_speech
 from app.parsing import normalize_log_payload
 from app.service import (
     deliver_to_telegram,
+    effective_chat_id,
     handle_user_audio,
     handle_user_text,
     run_reminder_pipeline,
@@ -92,6 +93,9 @@ async def _standalone_poll_loop() -> None:
     logger.info("Standalone Telegram polling started")
     while True:
         try:
+            # Rileggi settings/chat_id a runtime (può essere auto-appreso)
+            settings = get_settings()
+            known = effective_chat_id(settings)
             updates = await get_updates(settings, offset=offset, timeout=25)
             for update in updates:
                 offset = update["update_id"] + 1
@@ -99,19 +103,26 @@ async def _standalone_poll_loop() -> None:
                 if not message:
                     continue
                 chat_id = str(message["chat"]["id"])
-                # Opzionale: filtra sulla chat configurata
-                if settings.telegram_chat_id and chat_id != str(settings.telegram_chat_id):
+                db.remember_chat_id(settings.database_path, chat_id)
+
+                if known and chat_id != str(known):
                     continue
 
                 if message.get("voice") or message.get("audio"):
                     file_id = (message.get("voice") or message.get("audio"))["file_id"]
                     audio = await download_file(settings, file_id)
-                    result = await handle_user_audio(settings, audio, source="voice")
+                    result = await handle_user_audio(
+                        settings,
+                        audio,
+                        source="voice",
+                        chat_id=chat_id,
+                    )
                 elif message.get("text"):
                     result = await handle_user_text(
                         settings,
                         message["text"],
                         source="chat",
+                        chat_id=chat_id,
                     )
                 else:
                     continue
@@ -158,7 +169,10 @@ async def lifespan(app: FastAPI):
         )
     else:
         scheduler.start()
-        logger.info("Internal reminders disabled (use n8n cron or set ENABLE_INTERNAL_REMINDERS=true)")
+        logger.info(
+            "Internal reminders disabled "
+            "(use n8n cron or set ENABLE_INTERNAL_REMINDERS=true)"
+        )
 
     if settings.standalone_bot:
         _poll_task = asyncio.create_task(_standalone_poll_loop())
@@ -176,7 +190,7 @@ async def lifespan(app: FastAPI):
     await shutdown_caller()
 
 
-app = FastAPI(title="Echo API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Echo API", version="1.1.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -185,10 +199,12 @@ async def health() -> Dict[str, Any]:
     return {
         "ok": True,
         "service": "echo-api",
+        "version": "1.1.0",
         "time": datetime.now(ZoneInfo(settings.tz)).isoformat(),
         "standalone_bot": settings.standalone_bot,
         "enable_voice_calls": settings.enable_voice_calls,
         "reminder_times": settings.reminder_times_list,
+        "chat_id": effective_chat_id(settings),
     }
 
 
@@ -199,7 +215,14 @@ async def context(limit: int = 10) -> Dict[str, Any]:
     return {
         "summary": db.context_summary(settings.database_path, limit=min(limit, 5)),
         "logs": logs,
+        "chat_id": effective_chat_id(settings),
     }
+
+
+@app.get("/logs")
+async def logs(limit: int = 50) -> Dict[str, Any]:
+    settings = get_settings()
+    return {"logs": db.recent_logs(settings.database_path, limit=limit)}
 
 
 @app.post("/log")
@@ -220,7 +243,12 @@ async def log_entry(body: LogIn) -> Dict[str, Any]:
 async def chat_endpoint(body: ChatIn) -> Dict[str, Any]:
     settings = get_settings()
     try:
-        result = await handle_user_text(settings, body.text, source=body.source)
+        result = await handle_user_text(
+            settings,
+            body.text,
+            source=body.source,
+            chat_id=body.chat_id,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -263,6 +291,7 @@ async def handle_audio(
             settings,
             audio,
             filename=file.filename or "voice.ogg",
+            chat_id=chat_id,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -283,7 +312,11 @@ async def telegram_file(body: TelegramFileIn) -> Dict[str, Any]:
     settings = get_settings()
     try:
         audio = await download_file(settings, body.file_id)
-        result = await handle_user_audio(settings, audio)
+        result = await handle_user_audio(
+            settings,
+            audio,
+            chat_id=body.chat_id,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -297,10 +330,52 @@ async def telegram_file(body: TelegramFileIn) -> Dict[str, Any]:
     return result
 
 
+@app.get("/telegram/discover-chat")
+async def discover_chat() -> Dict[str, Any]:
+    """Legge getUpdates e memorizza il primo chat_id trovato."""
+    settings = get_settings()
+    try:
+        updates = await get_updates(settings, timeout=0)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    found = []
+    for update in updates:
+        message = update.get("message") or update.get("edited_message")
+        if not message:
+            continue
+        chat = message.get("chat") or {}
+        chat_id = str(chat.get("id", ""))
+        if not chat_id:
+            continue
+        db.remember_chat_id(settings.database_path, chat_id)
+        found.append(
+            {
+                "chat_id": chat_id,
+                "type": chat.get("type"),
+                "username": chat.get("username"),
+                "first_name": chat.get("first_name"),
+                "text": message.get("text"),
+            }
+        )
+
+    current = effective_chat_id(settings)
+    return {
+        "ok": True,
+        "current_chat_id": current,
+        "candidates": found,
+        "hint": (
+            "Scrivi un messaggio al bot su Telegram, poi richiama questo endpoint "
+            "oppure lascia STANDALONE_BOT=true: il chat_id viene appreso da solo."
+        ),
+    }
+
+
 @app.post("/tts")
 async def tts(body: TTSIn) -> FileResponse:
     settings = get_settings()
-    out = Path(settings.tmp_audio_dir) / f"tts-{datetime.utcnow().timestamp()}.{settings.fish_tts_format}"
+    stamp = datetime.now(timezone.utc).timestamp()
+    out = Path(settings.tmp_audio_dir) / f"tts-{stamp}.{settings.fish_tts_format}"
     try:
         await text_to_speech(settings, body.text, out)
     except Exception as exc:  # noqa: BLE001
@@ -332,7 +407,10 @@ async def call_endpoint(body: CallIn) -> Dict[str, Any]:
     if audio_path is None:
         if not body.text:
             raise HTTPException(status_code=400, detail="Serve audio_path oppure text")
-        audio_path = Path(settings.tmp_audio_dir) / f"call-{datetime.utcnow().timestamp()}.{settings.fish_tts_format}"
+        stamp = datetime.now(timezone.utc).timestamp()
+        audio_path = (
+            Path(settings.tmp_audio_dir) / f"call-{stamp}.{settings.fish_tts_format}"
+        )
         try:
             await text_to_speech(settings, body.text, audio_path)
         except Exception as exc:  # noqa: BLE001

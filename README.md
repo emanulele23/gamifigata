@@ -40,19 +40,25 @@ DeepSeek tiene basso il costo del LLM. SQLite è gratis e locale.
 ## Quick start
 
 ```bash
-git clone <URL_DI_QUESTA_REPO> echo
+git clone https://github.com/emanulele23/gamifigata.git echo
 cd echo
-cp .env.example .env
-nano .env   # inserisci le chiavi
+# finché la PR non è mergiata:
+git checkout cursor/echo-personal-agent-4b35
 
-chmod +x scripts/setup.sh
+cp .env.example .env
+nano .env   # TELEGRAM_BOT_TOKEN, DEEPSEEK_API_KEY, FISH_API_KEY, FISH_REFERENCE_ID
+
+chmod +x scripts/*.sh scripts/*.py
 ./scripts/setup.sh
 ```
 
-Oppure a mano:
+Comandi utili:
 
 ```bash
-docker compose up -d --build
+make up          # build + start
+make health      # GET /health
+make logs        # log docker
+./scripts/get_chat_id.sh   # se vuoi forzare TELEGRAM_CHAT_ID nel .env
 ```
 
 Servizi:
@@ -66,14 +72,13 @@ Servizi:
 
 **A) Consigliato per partire subito — standalone bot**
 
-Nel `.env`:
+Nel `.env` (già default in `.env.example`):
 
 ```env
 STANDALONE_BOT=true
 ```
 
-Poi `docker compose up -d --build`.  
-`echo-api` fa polling Telegram, risponde con testo + nota vocale, e invia i promemoria agli orari in `REMINDER_TIMES`. n8n resta disponibile ma non è obbligatorio.
+`echo-api` fa polling Telegram, risponde con testo + nota vocale, apprende da solo il `chat_id` al primo messaggio, e invia i promemoria agli orari in `REMINDER_TIMES`. n8n resta disponibile ma non è obbligatorio.
 
 **B) Orchestrazione n8n**
 
@@ -83,9 +88,8 @@ Poi `docker compose up -d --build`.
    - [`n8n/workflows/B_ricezione.json`](n8n/workflows/B_ricezione.json)
 3. Nel workflow B collega le credenziali Telegram (stesso bot token)
 4. Attiva i workflow
-5. Lascia `STANDALONE_BOT=false` per evitare doppie risposte
-
-> Nota: per evitare doppi promemoria, se usi i cron di n8n imposta `ENABLE_INTERNAL_REMINDERS=false` nel `.env`.
+5. Imposta `STANDALONE_BOT=false` per evitare doppie risposte
+6. Imposta `ENABLE_INTERNAL_REMINDERS=false` se usi i cron di n8n
 
 ## Variabili `.env` essenziali
 
@@ -103,17 +107,24 @@ ENABLE_VOICE_CALLS=false
 
 ### Come trovare `TELEGRAM_CHAT_ID`
 
-1. Avvia lo stack con almeno il bot token
-2. Scrivi un messaggio al bot
-3. Apri: `https://api.telegram.org/bot<TOKEN>/getUpdates`
-4. Copia `message.chat.id`
+Con `STANDALONE_BOT=true` basta scrivere al bot: Echo lo memorizza da solo.
+
+In alternativa:
+
+```bash
+./scripts/get_chat_id.sh
+# oppure, stack acceso:
+curl http://IP_RASPI:5000/telegram/discover-chat
+```
 
 ## API echo-api (per n8n o test)
 
 | Metodo | Path | Descrizione |
 |---|---|---|
-| GET | `/health` | stato |
+| GET | `/health` | stato (+ chat_id appreso) |
 | GET | `/context` | ultimi log + summary |
+| GET | `/logs` | elenco log grezzi |
+| GET | `/telegram/discover-chat` | trova/memorizza chat_id |
 | POST | `/log` | salva tracking manuale |
 | POST | `/chat` | testo → DeepSeek → TTS → (opz.) invio Telegram |
 | POST | `/transcribe` | upload audio → Fish ASR |

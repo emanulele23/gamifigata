@@ -35,6 +35,22 @@ class ParsingDbTests(unittest.TestCase):
             summary = db.context_summary(path)
             self.assertIn("insalata", summary)
 
+    def test_chat_id_and_messages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "echo.db")
+            db.init_db(path)
+            self.assertIsNone(db.resolve_chat_id(path, ""))
+            db.remember_chat_id(path, "12345")
+            self.assertEqual(db.resolve_chat_id(path, ""), "12345")
+            self.assertEqual(db.resolve_chat_id(path, "999"), "999")
+
+            db.add_message(path, "user", "ciao", chat_id="12345")
+            db.add_message(path, "assistant", "ehi!", chat_id="12345")
+            history = db.recent_messages(path, limit=8, chat_id="12345")
+            self.assertEqual(len(history), 2)
+            self.assertEqual(history[0]["role"], "user")
+            self.assertEqual(history[1]["content"], "ehi!")
+
 
 if __name__ == "__main__":
     unittest.main()

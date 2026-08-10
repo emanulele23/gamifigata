@@ -23,6 +23,12 @@ def _slot_label(settings: Settings) -> str:
     return now.strftime("%H:%M")
 
 
+def effective_chat_id(settings: Settings, chat_id: Optional[str] = None) -> Optional[str]:
+    if chat_id:
+        return str(chat_id)
+    return db.resolve_chat_id(settings.database_path, settings.telegram_chat_id)
+
+
 async def build_reminder(settings: Settings) -> Dict[str, Any]:
     context = db.context_summary(settings.database_path, limit=5)
     prompt = REMINDER_USER_TEMPLATE.format(
@@ -32,7 +38,10 @@ async def build_reminder(settings: Settings) -> Dict[str, Any]:
     reply = await deepseek_chat(settings, prompt)
     spoken, _ = split_reply_and_data(reply)
 
-    audio_path = Path(settings.tmp_audio_dir) / f"reminder-{uuid.uuid4().hex}.{settings.fish_tts_format}"
+    audio_path = (
+        Path(settings.tmp_audio_dir)
+        / f"reminder-{uuid.uuid4().hex}.{settings.fish_tts_format}"
+    )
     await text_to_speech(settings, spoken, audio_path)
 
     return {
@@ -47,14 +56,27 @@ async def handle_user_text(
     text: str,
     *,
     source: str = "chat",
+    chat_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    target_chat = effective_chat_id(settings, chat_id)
+    if target_chat and not settings.telegram_chat_id:
+        db.remember_chat_id(settings.database_path, target_chat)
+
     context = db.context_summary(settings.database_path, limit=5)
+    history = db.recent_messages(
+        settings.database_path,
+        limit=8,
+        chat_id=target_chat,
+    )
     user_msg = (
-        f"Contesto recente:\n{context}\n\n"
+        f"Contesto recente dal diario:\n{context}\n\n"
         f"Messaggio utente:\n{text}"
     )
-    reply = await deepseek_chat(settings, user_msg)
+    reply = await deepseek_chat(settings, user_msg, history=history)
     spoken, data = split_reply_and_data(reply)
+
+    db.add_message(settings.database_path, "user", text, chat_id=target_chat)
+    db.add_message(settings.database_path, "assistant", spoken, chat_id=target_chat)
 
     saved = None
     if data:
@@ -67,7 +89,10 @@ async def handle_user_text(
                 **payload,
             )
 
-    audio_path = Path(settings.tmp_audio_dir) / f"reply-{uuid.uuid4().hex}.{settings.fish_tts_format}"
+    audio_path = (
+        Path(settings.tmp_audio_dir)
+        / f"reply-{uuid.uuid4().hex}.{settings.fish_tts_format}"
+    )
     await text_to_speech(settings, spoken, audio_path)
 
     return {
@@ -76,6 +101,7 @@ async def handle_user_text(
         "data": data,
         "saved": saved,
         "audio_path": str(audio_path),
+        "chat_id": target_chat,
     }
 
 
@@ -85,6 +111,7 @@ async def handle_user_audio(
     *,
     filename: str = "voice.ogg",
     source: str = "voice",
+    chat_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     transcript = await speech_to_text(
         settings,
@@ -92,7 +119,12 @@ async def handle_user_audio(
         language="it",
         filename=filename,
     )
-    result = await handle_user_text(settings, transcript, source=source)
+    result = await handle_user_text(
+        settings,
+        transcript,
+        source=source,
+        chat_id=chat_id,
+    )
     result["transcript"] = transcript
     return result
 
@@ -104,19 +136,25 @@ async def deliver_to_telegram(
     audio_path: Optional[str] = None,
     chat_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"message": None, "voice": None}
+    target = effective_chat_id(settings, chat_id)
+    if not target:
+        raise RuntimeError(
+            "TELEGRAM_CHAT_ID mancante. Scrivi al bot oppure imposta TELEGRAM_CHAT_ID nel .env"
+        )
+
+    out: Dict[str, Any] = {"message": None, "voice": None, "chat_id": target}
     if audio_path and Path(audio_path).exists():
         caption = text if text and len(text) <= 900 else None
         out["voice"] = await send_voice(
             settings,
             Path(audio_path),
-            chat_id=chat_id,
+            chat_id=target,
             caption=caption,
         )
         if text and caption is None:
-            out["message"] = await send_message(settings, text, chat_id=chat_id)
+            out["message"] = await send_message(settings, text, chat_id=target)
     else:
-        out["message"] = await send_message(settings, text, chat_id=chat_id)
+        out["message"] = await send_message(settings, text, chat_id=target)
     return out
 
 

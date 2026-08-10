@@ -18,7 +18,24 @@ CREATE TABLE IF NOT EXISTS health_logs (
     source TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_health_logs_data_ora ON health_logs(data_ora);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    data_ora TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    chat_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_messages_data_ora ON messages(data_ora);
 """
+
+
+_initialized: set[str] = set()
 
 
 def init_db(db_path: str) -> None:
@@ -26,10 +43,17 @@ def init_db(db_path: str) -> None:
     with sqlite3.connect(db_path) as conn:
         conn.executescript(SCHEMA)
         conn.commit()
+    _initialized.add(db_path)
+
+
+def ensure_db(db_path: str) -> None:
+    if db_path not in _initialized:
+        init_db(db_path)
 
 
 @contextmanager
 def connect(db_path: str):
+    ensure_db(db_path)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
@@ -54,6 +78,85 @@ def _deserialize_habits(value: Optional[str]) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return value
+
+
+def get_meta(db_path: str, key: str) -> Optional[str]:
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (key,)
+        ).fetchone()
+    return row["value"] if row else None
+
+
+def set_meta(db_path: str, key: str, value: str) -> None:
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO meta(key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+
+
+def resolve_chat_id(db_path: str, configured: str = "") -> Optional[str]:
+    if configured:
+        return str(configured)
+    return get_meta(db_path, "telegram_chat_id")
+
+
+def remember_chat_id(db_path: str, chat_id: str) -> None:
+    set_meta(db_path, "telegram_chat_id", str(chat_id))
+
+
+def add_message(
+    db_path: str,
+    role: str,
+    content: str,
+    *,
+    chat_id: Optional[str] = None,
+) -> None:
+    ts = datetime.now(timezone.utc).isoformat()
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO messages (data_ora, role, content, chat_id)
+            VALUES (?, ?, ?, ?)
+            """,
+            (ts, role, content, chat_id),
+        )
+
+
+def recent_messages(
+    db_path: str,
+    limit: int = 8,
+    *,
+    chat_id: Optional[str] = None,
+) -> List[Dict[str, str]]:
+    with connect(db_path) as conn:
+        if chat_id:
+            rows = conn.execute(
+                """
+                SELECT role, content FROM messages
+                WHERE chat_id = ? OR chat_id IS NULL
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (str(chat_id), limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT role, content FROM messages
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+    return [
+        {"role": row["role"], "content": row["content"]}
+        for row in reversed(rows)
+    ]
 
 
 def insert_log(
