@@ -1,0 +1,91 @@
+{
+  "name": "Echo A — Promemoria proattivi",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 13 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-lunch",
+      "name": "Cron Pranzo 13:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 21 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-evening",
+      "name": "Cron Sera 21:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 520]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://echo-api:5000/remind",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"send\": true,\n  \"try_call\": false\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "http-remind",
+      "name": "Echo /remind",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 400]
+    }
+  ],
+  "connections": {
+    "Cron Pranzo 13:30": {
+      "main": [
+        [
+          {
+            "node": "Echo /remind",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Sera 21:00": {
+      "main": [
+        [
+          {
+            "node": "Echo /remind",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "name": "echo"
+    }
+  ]
+}

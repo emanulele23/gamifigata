@@ -1,0 +1,125 @@
+{
+  "name": "Echo B — Ricezione e tracking",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 400],
+      "webhookId": "echo-telegram-trigger",
+      "notesInFlow": true,
+      "notes": "Collega le credenziali Bot Telegram (stesso token del .env)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-voice",
+              "leftValue": "={{ $json.message.voice.file_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-voice",
+      "name": "È nota vocale?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://echo-api:5000/telegram/file",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"file_id\": \"{{ $json.message.voice.file_id }}\",\n  \"send\": true,\n  \"chat_id\": \"{{ $json.message.chat.id }}\"\n}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "http-voice",
+      "name": "Echo /telegram/file",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://echo-api:5000/chat",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"{{ $json.message.text }}\",\n  \"send\": true,\n  \"chat_id\": \"{{ $json.message.chat.id }}\",\n  \"source\": \"chat\"\n}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "http-chat",
+      "name": "Echo /chat",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 520]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "È nota vocale?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "È nota vocale?": {
+      "main": [
+        [
+          {
+            "node": "Echo /telegram/file",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Echo /chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    {
+      "name": "echo"
+    }
+  ]
+}

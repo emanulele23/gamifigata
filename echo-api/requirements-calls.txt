@@ -1,0 +1,3 @@
+# Opzionale: riproduzione in voice chat Telegram
+# Installa solo se ENABLE_VOICE_CALLS=true e vuoi il tentativo pytgcalls
+py-tgcalls==2.1.0
