@@ -86,6 +86,7 @@ STANDALONE_BOT=true
 2. Importa:
    - [`n8n/workflows/A_promemoria.json`](n8n/workflows/A_promemoria.json)
    - [`n8n/workflows/B_ricezione.json`](n8n/workflows/B_ricezione.json)
+   - (opz.) [`n8n/workflows/C_chiamata.json`](n8n/workflows/C_chiamata.json)
 3. Nel workflow B collega le credenziali Telegram (stesso bot token)
 4. Attiva i workflow
 5. Imposta `STANDALONE_BOT=false` per evitare doppie risposte

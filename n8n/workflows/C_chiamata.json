@@ -1,0 +1,62 @@
+{
+  "name": "Echo C — Chiamata vocale (opzionale)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "echo-call",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-call",
+      "name": "Webhook /echo-call",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [280, 360],
+      "webhookId": "echo-call",
+      "notesInFlow": true,
+      "notes": "Richiede ENABLE_VOICE_CALLS=true e login userbot. Body JSON: {\"text\": \"...\"} oppure {\"audio_path\": \"...\"}"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://echo-api:5000/call",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body || $json) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "http-call",
+      "name": "Echo /call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 360]
+    }
+  ],
+  "connections": {
+    "Webhook /echo-call": {
+      "main": [
+        [
+          {
+            "node": "Echo /call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": [
+    {
+      "name": "echo"
+    }
+  ]
+}
