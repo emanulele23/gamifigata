@@ -41,7 +41,7 @@
         "url": "http://echo-api:5000/remind",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"send\": true,\n  \"try_call\": false\n}",
+        "jsonBody": "={\n  \"send\": true,\n  \"try_call\": true\n}",
         "options": {
           "timeout": 120000
         }

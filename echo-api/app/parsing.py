@@ -36,4 +36,17 @@ def normalize_log_payload(data: Dict[str, Any]) -> Dict[str, Any]:
         out["habits_done"] = data["habits_done"]
     if data.get("note_salute"):
         out["note_salute"] = str(data["note_salute"]).strip()
+    if data.get("attivita_fisica") is not None:
+        val = data["attivita_fisica"]
+        if isinstance(val, bool):
+            out["attivita_fisica"] = val
+        elif str(val).lower() in ("true", "1", "si", "sì", "yes"):
+            out["attivita_fisica"] = True
+        elif str(val).lower() in ("false", "0", "no"):
+            out["attivita_fisica"] = False
+    if data.get("minuti_attivita") is not None and data.get("minuti_attivita") != "":
+        try:
+            out["minuti_attivita"] = int(data["minuti_attivita"])
+        except (TypeError, ValueError):
+            pass
     return out

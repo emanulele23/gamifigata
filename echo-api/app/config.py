@@ -26,17 +26,20 @@ class Settings(BaseSettings):
     database_path: str = "/app/data/echo.db"
     tmp_audio_dir: str = "/app/tmp"
 
-    reminder_times: str = "13:30,21:00"
-    # Se false, i cron restano solo a n8n (evita doppi promemoria)
+    reminder_times: str = "09:00,14:00,21:00"
     enable_internal_reminders: bool = True
-    standalone_bot: bool = False
-    enable_voice_calls: bool = False
+    standalone_bot: bool = True
+    enable_voice_calls: bool = True
+    prefer_calls_on_checkin: bool = True
     tz: str = "Europe/Rome"
 
     telegram_api_id: int | None = None
     telegram_api_hash: str = ""
     telegram_call_target: str = ""
     telegram_session_path: str = "/app/data/echo_userbot"
+
+    apple_health_secret: str = ""
+    echo_public_url: str = "http://localhost:5000"
 
     @property
     def reminder_times_list(self) -> List[str]:

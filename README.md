@@ -1,228 +1,99 @@
-# Echo — Personal Life & Health Agent
+# Echo — Assistente vocale proattivo per salute e crescita
 
-Agente personale per **Raspberry Pi 5 (8GB)**: health & habit tracking via Telegram, con voce umana (Fish Audio), cervello LLM (DeepSeek) e orchestrazione **n8n** + SQLite locale.
+Echo **ti chiama 2-3 volte al giorno** (Telegram), ti fa **domande mirate** con voce naturale, **compila i dati per te** e tiene traccia di obiettivi, streak e Apple Salute — **senza aprire un’app ogni volta**.
 
-Clona, compila `.env`, avvia Docker. Niente GPU.
+Pensato per **Raspberry Pi 5**: `git clone` → onboarding guidato → Docker.
 
-## Architettura
+## Cosa fa (in pratica)
 
-```
-Raspberry Pi 5
-├── n8n (Docker)          → cron + Telegram trigger
-├── echo-api (Docker)     → DeepSeek, Fish TTS/ASR, SQLite, /call
-└── data/echo.db          → log cibo, mood, habits, note salute
-         │
-         ├── Telegram Bot (chat + note vocali)
-         ├── DeepSeek API (ragionamento)
-         └── Fish Audio API (TTS + trascrizione ASR)
-```
+| Momento | Echo ti chiede… | Salva |
+|---|---|---|
+| Mattina (~9:00) | Come hai dormito, come ti senti | umore, sonno |
+| Pranzo (~14:00) | Cosa hai mangiato, ti sei mosso | pasto, attività |
+| Sera (~21:00) | Giornata, umore, micro-vittorie | mood, habits, note |
 
-### Perché non OpenAI Whisper?
+- **Voce umana** (Fish Audio) + **cervello** (DeepSeek)
+- **Gamification**: obiettivi personali, streak, celebrazioni brevi
+- **Apple Salute**: iPhone invia passi/esercizio via Shortcut (vedi [docs/apple-health-shortcut.md](docs/apple-health-shortcut.md))
+- **Zero sforzo manuale**: rispondi a voce o in chat, Echo estrae i dati
 
-Per uso personale **senza GPU**, la trascrizione gira su **Fish Audio ASR** (`/v1/asr`):
-
-- stesso ordine di costo di Whisper (~$0.36/ora audio → centesimi/mese)
-- **una sola API key** insieme al TTS
-- zero carico CPU sul Pi
-
-DeepSeek tiene basso il costo del LLM. SQLite è gratis e locale.
-
-## Requisiti sulla Raspi
-
-- Raspberry Pi OS 64-bit
-- Docker + Docker Compose plugin
-- Account/API:
-  1. Telegram Bot token (`@BotFather`) + il tuo `chat_id`
-  2. DeepSeek API key
-  3. Fish Audio API key + `reference_id` della voce clonata
-  4. *(opzionale, chiamate)* Telegram `api_id` / `api_hash` da [my.telegram.org](https://my.telegram.org) + secondo account userbot
-
-## Quick start
+## Prima installazione (consigliato)
 
 ```bash
 git clone https://github.com/emanulele23/gamifigata.git echo
 cd echo
-# finché la PR non è mergiata:
 git checkout cursor/echo-personal-agent-4b35
 
-cp .env.example .env
-nano .env   # TELEGRAM_BOT_TOKEN, DEEPSEEK_API_KEY, FISH_API_KEY, FISH_REFERENCE_ID
-
-chmod +x scripts/*.sh scripts/*.py
-./scripts/setup.sh
+python3 scripts/onboard.py   # wizard: nome, API key, obiettivi, orari, Apple Salute
+./scripts/setup.sh           # oppure: make up
 ```
 
-Comandi utili:
+Il wizard ti chiede:
+- Nome e fuso orario
+- Token Telegram, API DeepSeek e Fish Audio
+- Orari check-in (default 09:00, 14:00, 21:00)
+- Se vuoi **chiamate/notifiche vocali**
+- Chi sei e cosa vuoi migliorare → Echo propone **micro-obiettivi** con l’AI
+- Collegamento **Apple Salute** (opzionale)
+
+## Dopo l’avvio
 
 ```bash
-make up          # build + start
-make health      # GET /health
-make logs        # log docker
-./scripts/get_chat_id.sh   # se vuoi forzare TELEGRAM_CHAT_ID nel .env
+make health      # stato + onboarding
+make checkin     # simula un check-in vocale adesso
+make logs
 ```
 
-Servizi:
+Scrivi al bot su Telegram: risponde con testo + nota vocale.
 
-| Servizio | URL |
-|---|---|
-| echo-api | `http://IP_RASPI:5000/health` |
-| n8n | `http://IP_RASPI:5678` |
+### Chiamate vocali (Fase 5)
 
-### Due modi di usare Echo
-
-**A) Consigliato per partire subito — standalone bot**
-
-Nel `.env` (già default in `.env.example`):
-
-```env
-STANDALONE_BOT=true
-```
-
-`echo-api` fa polling Telegram, risponde con testo + nota vocale, apprende da solo il `chat_id` al primo messaggio, e invia i promemoria agli orari in `REMINDER_TIMES`. n8n resta disponibile ma non è obbligatorio.
-
-**B) Orchestrazione n8n**
-
-1. Apri n8n su porta `5678` e completa il setup utente
-2. Importa:
-   - [`n8n/workflows/A_promemoria.json`](n8n/workflows/A_promemoria.json)
-   - [`n8n/workflows/B_ricezione.json`](n8n/workflows/B_ricezione.json)
-   - (opz.) [`n8n/workflows/C_chiamata.json`](n8n/workflows/C_chiamata.json)
-3. Nel workflow B collega le credenziali Telegram (stesso bot token)
-4. Attiva i workflow
-5. Imposta `STANDALONE_BOT=false` per evitare doppie risposte
-6. Imposta `ENABLE_INTERNAL_REMINDERS=false` se usi i cron di n8n
-
-## Variabili `.env` essenziali
-
-```env
-TELEGRAM_BOT_TOKEN=...
-TELEGRAM_CHAT_ID=...          # scrivi al bot, poi usa getUpdates o @userinfobot
-DEEPSEEK_API_KEY=...
-FISH_API_KEY=...
-FISH_REFERENCE_ID=...         # voce clonata su fish.audio
-REMINDER_TIMES=13:30,21:00
-TZ=Europe/Rome
-STANDALONE_BOT=true           # true = funziona senza configurare n8n
-ENABLE_VOICE_CALLS=false
-```
-
-### Come trovare `TELEGRAM_CHAT_ID`
-
-Con `STANDALONE_BOT=true` basta scrivere al bot: Echo lo memorizza da solo.
-
-In alternativa:
+Con `ENABLE_VOICE_CALLS=true`, agli check-in Echo tenta una **consegna vocale via userbot Telegram** (nota vocale + opz. voice chat). Setup:
 
 ```bash
-./scripts/get_chat_id.sh
-# oppure, stack acceso:
-curl http://IP_RASPI:5000/telegram/discover-chat
-```
-
-## API echo-api (per n8n o test)
-
-| Metodo | Path | Descrizione |
-|---|---|---|
-| GET | `/health` | stato (+ chat_id appreso) |
-| GET | `/context` | ultimi log + summary |
-| GET | `/logs` | elenco log grezzi |
-| GET | `/telegram/discover-chat` | trova/memorizza chat_id |
-| POST | `/log` | salva tracking manuale |
-| POST | `/chat` | testo → DeepSeek → TTS → (opz.) invio Telegram |
-| POST | `/transcribe` | upload audio → Fish ASR |
-| POST | `/handle-audio` | audio → ASR → LLM → TTS |
-| POST | `/telegram/file` | `file_id` Telegram → pipeline completa |
-| POST | `/remind` | genera promemoria e invia |
-| POST | `/tts` | testo → file audio |
-| POST | `/call` | userbot: consegna vocale / voice chat |
-
-Esempio promemoria:
-
-```bash
-curl -X POST http://localhost:5000/remind \
-  -H 'Content-Type: application/json' \
-  -d '{"send": true, "try_call": false}'
-```
-
-## Database SQLite
-
-File: `echo-api/data/echo.db`
-
-| Campo | Tipo | Descrizione |
-|---|---|---|
-| data_ora | timestamp ISO | quando |
-| pasto | testo | cibo |
-| mood_score | 1–10 | umore |
-| habits_done | JSON/lista | abitudini |
-| note_salute | testo | sonno, sintomi, stanchezza |
-| raw_text | testo | messaggio originale |
-| source | testo | `chat` / `voice` / `api` |
-
-Echo estrae i dati da un blocco `<data>{...}</data>` generato dal LLM.
-
-## Fase 5 — Chiamate vocali (opzionale)
-
-Le chiamate VoIP 1:1 “classiche” di Telegram non sono stabilmente supportate dalle librerie open-source. Echo usa un **userbot Pyrogram** che:
-
-1. invia la nota vocale dal secondo account (affidabile)
-2. se installi `py-tgcalls`, prova a riprodurre l’audio in una voice chat sul target
-
-Setup:
-
-```bash
-# 1) Compila nel .env:
-# TELEGRAM_API_ID=...
-# TELEGRAM_API_HASH=...
-# TELEGRAM_CALL_TARGET=@tuo_username_oppure_id
-# ENABLE_VOICE_CALLS=true
-
-# 2) Login interattivo (una tantum)
-python3 -m venv .venv
-source .venv/bin/activate
-pip install pyrogram tgcrypto
-python scripts/login_userbot.py
-
-# 3) (opzionale) voice chat playback
-# Entra nel container e: pip install -r requirements-calls.txt
-
+python3 scripts/login_userbot.py
 docker compose up -d --build
 ```
 
-Test:
+## Apple Salute
 
-```bash
-curl -X POST http://localhost:5000/call \
-  -H 'Content-Type: application/json' \
-  -d '{"text": "Ehi, solo un check veloce. Come stai?"}'
+La Raspi **non accede** direttamente a Salute. Un **Shortcut iPhone** manda passi e minuti esercizio a Echo. Guida: [docs/apple-health-shortcut.md](docs/apple-health-shortcut.md).
+
+## Architettura
+
+```
+iPhone (Shortcut Salute) ──POST──► echo-api ──► SQLite
+Telegram ◄── check-in vocali ── echo-api ──► DeepSeek + Fish Audio
+n8n (opzionale) ── cron ──► echo-api
 ```
 
-## Costi stimati (uso personale)
+## API utili
 
-| Voce | Stima |
+| Endpoint | Descrizione |
 |---|---|
-| DeepSeek | pochi €/mese |
-| Fish TTS + ASR | centesimi–pochi €/mese |
-| SQLite / n8n self-host | 0 |
-| OpenAI Whisper | **non usato** |
+| `POST /checkin` | check-in vocale immediato |
+| `GET /profile` | profilo e orari |
+| `GET /goals` | obiettivi + streak |
+| `POST /integrations/apple-health` | dati da iPhone |
+| `GET /health` | stato sistema |
 
-## Persona (system prompt)
+## Costi
 
-Echo è un amico/accountability partner: italiano parlato, una domanda alla volta, validazione emotiva prima dei dati, blocco `<data>` per il tracking.
+- DeepSeek + Fish Audio: pochi €/mese uso personale
+- Fish ASR per trascrizione (no Whisper/OpenAI, no GPU)
+- SQLite e n8n self-host: gratis
 
-## Troubleshooting
+## n8n (opzionale)
 
-- **`/health` down**: `docker compose logs -f echo-api`
-- **Bot non risponde**: verifica token, `TELEGRAM_CHAT_ID`, e che non ci siano *due* consumer attivi (standalone + n8n) sullo stesso bot
-- **TTS/ASR error**: controlla `FISH_API_KEY` e `FISH_REFERENCE_ID`
-- **DeepSeek error**: controlla credito/API key su platform.deepseek.com
-- **Permessi Docker**: aggiungi l’utente al gruppo `docker`, poi ri-login
+Importa `n8n/workflows/A_promemoria.json`, `B_ricezione.json`, `C_chiamata.json`.  
+Se usi n8n per i cron, imposta `ENABLE_INTERNAL_REMINDERS=false`.
 
-## Struttura repo
+## Struttura
 
 ```
-├── docker-compose.yml
-├── .env.example
-├── scripts/setup.sh
-├── scripts/login_userbot.py
-├── echo-api/          # FastAPI + SQLite + Fish + DeepSeek + Pyrogram
-└── n8n/workflows/     # JSON importabili
+scripts/onboard.py      # wizard prima installazione
+scripts/setup.sh        # avvio Docker
+echo-api/               # backend FastAPI
+docs/apple-health-shortcut.md
+n8n/workflows/
 ```

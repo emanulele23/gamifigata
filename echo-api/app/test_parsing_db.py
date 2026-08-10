@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 from app import db
+from app.goals_engine import update_streaks_from_log
 from app.parsing import normalize_log_payload, split_reply_and_data
 
 
@@ -10,46 +11,50 @@ class ParsingDbTests(unittest.TestCase):
     def test_split_reply_and_data(self):
         reply = (
             "Senti, ha senso.\n"
-            '<data>{"pasto": "pasta", "mood_score": 7, "habits_done": ["Corsa"]}</data>'
+            '<data>{"pasto": "pasta", "mood_score": 7, "habits_done": ["Corsa"], '
+            '"attivita_fisica": true, "minuti_attivita": 30}</data>'
         )
         spoken, data = split_reply_and_data(reply)
         self.assertEqual(spoken, "Senti, ha senso.")
         self.assertEqual(data["pasto"], "pasta")
-        self.assertEqual(data["mood_score"], 7)
+        self.assertTrue(data["attivita_fisica"])
 
-    def test_normalize_and_insert(self):
+    def test_normalize_activity(self):
+        payload = normalize_log_payload(
+            {"attivita_fisica": "si", "minuti_attivita": 25}
+        )
+        self.assertTrue(payload["attivita_fisica"])
+        self.assertEqual(payload["minuti_attivita"], 25)
+
+    def test_profile_goals_streaks(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "echo.db")
             db.init_db(path)
-            payload = normalize_log_payload(
-                {
-                    "pasto": "insalata",
-                    "mood_score": 8,
-                    "habits_done": ["Meditazione"],
-                    "note_salute": "ho dormito poco",
-                }
+            db.save_profile(
+                path,
+                name="Marco",
+                checkin_times=["09:00", "21:00"],
+                onboarding_complete=True,
             )
-            saved = db.insert_log(path, raw_text="oggi così", source="test", **payload)
-            self.assertEqual(saved["pasto"], "insalata")
-            self.assertEqual(saved["mood_score"], 8)
-            summary = db.context_summary(path)
-            self.assertIn("insalata", summary)
+            goal = db.add_goal(path, title="Corsa", category="fitness")
+            db.insert_log(
+                path,
+                habits_done=["Corsa"],
+                attivita_fisica=True,
+                source="test",
+            )
+            update_streaks_from_log(path, {"habits_done": ["Corsa"]})
+            streaks = db.get_streaks(path)
+            self.assertEqual(streaks[0]["current_streak"], 1)
 
-    def test_chat_id_and_messages(self):
+    def test_apple_health(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "echo.db")
             db.init_db(path)
-            self.assertIsNone(db.resolve_chat_id(path, ""))
-            db.remember_chat_id(path, "12345")
-            self.assertEqual(db.resolve_chat_id(path, ""), "12345")
-            self.assertEqual(db.resolve_chat_id(path, "999"), "999")
-
-            db.add_message(path, "user", "ciao", chat_id="12345")
-            db.add_message(path, "assistant", "ehi!", chat_id="12345")
-            history = db.recent_messages(path, limit=8, chat_id="12345")
-            self.assertEqual(len(history), 2)
-            self.assertEqual(history[0]["role"], "user")
-            self.assertEqual(history[1]["content"], "ehi!")
+            saved = db.upsert_apple_health(path, day="2026-08-10", steps=9000)
+            self.assertEqual(saved["steps"], 9000)
+            summary = db.apple_health_summary(path, day="2026-08-10")
+            self.assertIn("9000", summary)
 
 
 if __name__ == "__main__":

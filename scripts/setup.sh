@@ -20,10 +20,10 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 if [[ ! -f .env ]]; then
-  cp .env.example .env
-  echo "Creato .env da .env.example — aprilo e inserisci le API key."
-  echo "  nano .env"
-  exit 0
+  echo "Manca .env — esegui prima la configurazione guidata:"
+  echo "  python3 scripts/onboard.py"
+  echo "Oppure: cp .env.example .env && nano .env"
+  exit 1
 fi
 
 missing=0

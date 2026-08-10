@@ -24,6 +24,7 @@ from app.service import (
     effective_chat_id,
     handle_user_audio,
     handle_user_text,
+    run_checkin_pipeline,
     run_reminder_pipeline,
 )
 from app.telegram_bot import download_file, get_updates
@@ -37,9 +38,46 @@ class LogIn(BaseModel):
     mood_score: Optional[int] = Field(default=None, ge=1, le=10)
     habits_done: Optional[Any] = None
     note_salute: Optional[str] = None
+    attivita_fisica: Optional[bool] = None
+    minuti_attivita: Optional[int] = None
+    checkin_slot: Optional[str] = None
     raw_text: Optional[str] = None
     source: str = "api"
     data_ora: Optional[str] = None
+
+
+class ProfileIn(BaseModel):
+    name: Optional[str] = None
+    timezone: Optional[str] = None
+    checkin_times: Optional[list] = None
+    prefer_calls: Optional[bool] = None
+    apple_health_enabled: Optional[bool] = None
+    onboarding_complete: Optional[bool] = None
+
+
+class GoalIn(BaseModel):
+    title: str
+    description: str = ""
+    category: str = "crescita"
+    metric: str = "daily"
+    target_value: Optional[float] = None
+    unit: str = ""
+
+
+class AppleHealthIn(BaseModel):
+    day: Optional[str] = None
+    steps: Optional[int] = None
+    active_energy_kcal: Optional[float] = None
+    exercise_minutes: Optional[float] = None
+    sleep_hours: Optional[float] = None
+    workouts: Optional[Any] = None
+    secret: Optional[str] = None
+
+
+class CheckinIn(BaseModel):
+    send: bool = True
+    try_call: bool = True
+    hhmm: Optional[str] = None
 
 
 class ChatIn(BaseModel):
@@ -76,15 +114,21 @@ _poll_task: Optional[asyncio.Task] = None
 
 async def _scheduled_reminder() -> None:
     settings = get_settings()
-    logger.info("Running scheduled reminder")
+    logger.info("Running scheduled check-in")
     try:
-        await run_reminder_pipeline(
+        await run_checkin_pipeline(
             settings,
             send=True,
-            try_call=settings.enable_voice_calls,
+            try_call=True,
         )
     except Exception:  # noqa: BLE001
-        logger.exception("Scheduled reminder failed")
+        logger.exception("Scheduled check-in failed")
+
+
+def _scheduled_times(settings) -> list[str]:
+    profile = db.get_profile(settings.database_path)
+    times = profile.get("checkin_times") or settings.reminder_times_list
+    return [t for t in times if t]
 
 
 async def _standalone_poll_loop() -> None:
@@ -148,8 +192,9 @@ async def lifespan(app: FastAPI):
     db.init_db(settings.database_path)
 
     scheduler = AsyncIOScheduler(timezone=ZoneInfo(settings.tz))
-    if settings.enable_internal_reminders and settings.reminder_times_list:
-        for hhmm in settings.reminder_times_list:
+    times = _scheduled_times(settings)
+    if settings.enable_internal_reminders and times:
+        for hhmm in times:
             hour, minute = hhmm.split(":")
             scheduler.add_job(
                 _scheduled_reminder,
@@ -158,15 +203,11 @@ async def lifespan(app: FastAPI):
                     minute=int(minute),
                     timezone=ZoneInfo(settings.tz),
                 ),
-                id=f"reminder-{hhmm}",
+                id=f"checkin-{hhmm}",
                 replace_existing=True,
             )
         scheduler.start()
-        logger.info(
-            "Reminders scheduled at %s (%s)",
-            settings.reminder_times_list,
-            settings.tz,
-        )
+        logger.info("Check-ins scheduled at %s (%s)", times, settings.tz)
     else:
         scheduler.start()
         logger.info(
@@ -190,21 +231,24 @@ async def lifespan(app: FastAPI):
     await shutdown_caller()
 
 
-app = FastAPI(title="Echo API", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="Echo API", version="1.2.0", lifespan=lifespan)
 
 
 @app.get("/health")
 async def health() -> Dict[str, Any]:
     settings = get_settings()
+    profile = db.get_profile(settings.database_path)
     return {
         "ok": True,
         "service": "echo-api",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "time": datetime.now(ZoneInfo(settings.tz)).isoformat(),
         "standalone_bot": settings.standalone_bot,
         "enable_voice_calls": settings.enable_voice_calls,
-        "reminder_times": settings.reminder_times_list,
+        "checkin_times": _scheduled_times(settings),
         "chat_id": effective_chat_id(settings),
+        "onboarding_complete": profile.get("onboarding_complete", False),
+        "user_name": profile.get("name"),
     }
 
 
@@ -388,13 +432,92 @@ async def tts(body: TTSIn) -> FileResponse:
 async def remind(body: RemindIn) -> Dict[str, Any]:
     settings = get_settings()
     try:
-        return await run_reminder_pipeline(
+        return await run_checkin_pipeline(
             settings,
             send=body.send,
-            try_call=body.try_call,
+            try_call=body.try_call or settings.enable_voice_calls,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/checkin")
+async def checkin(body: CheckinIn) -> Dict[str, Any]:
+    settings = get_settings()
+    try:
+        return await run_checkin_pipeline(
+            settings,
+            send=body.send,
+            try_call=body.try_call,
+            hhmm=body.hhmm,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/profile")
+async def get_profile_endpoint() -> Dict[str, Any]:
+    settings = get_settings()
+    return db.get_profile(settings.database_path)
+
+
+@app.post("/profile")
+async def save_profile_endpoint(body: ProfileIn) -> Dict[str, Any]:
+    settings = get_settings()
+    data = body.model_dump(exclude_none=True)
+    saved = db.save_profile(settings.database_path, **data)
+    return {"ok": True, "profile": saved}
+
+
+@app.get("/goals")
+async def list_goals_endpoint() -> Dict[str, Any]:
+    settings = get_settings()
+    return {
+        "goals": db.list_goals(settings.database_path),
+        "streaks": db.get_streaks(settings.database_path),
+    }
+
+
+@app.post("/goals")
+async def add_goal_endpoint(body: GoalIn) -> Dict[str, Any]:
+    settings = get_settings()
+    goal = db.add_goal(settings.database_path, **body.model_dump())
+    return {"ok": True, "goal": goal}
+
+
+@app.get("/streaks")
+async def streaks_endpoint() -> Dict[str, Any]:
+    settings = get_settings()
+    return {"streaks": db.get_streaks(settings.database_path)}
+
+
+@app.post("/integrations/apple-health")
+async def apple_health_ingest(body: AppleHealthIn) -> Dict[str, Any]:
+    settings = get_settings()
+    if settings.apple_health_secret:
+        token = body.secret or ""
+        if token != settings.apple_health_secret:
+            raise HTTPException(status_code=401, detail="Secret Apple Salute non valido")
+
+    day = (body.day or datetime.now(ZoneInfo(settings.tz)).date().isoformat())[:10]
+    saved = db.upsert_apple_health(
+        settings.database_path,
+        day=day,
+        steps=body.steps,
+        active_energy_kcal=body.active_energy_kcal,
+        exercise_minutes=body.exercise_minutes,
+        sleep_hours=body.sleep_hours,
+        workouts=body.workouts,
+    )
+    db.save_profile(settings.database_path, apple_health_enabled=True)
+    return {"ok": True, "data": saved}
+
+
+@app.get("/integrations/apple-health")
+async def apple_health_get(day: Optional[str] = None) -> Dict[str, Any]:
+    settings = get_settings()
+    data = db.get_apple_health(settings.database_path, day=day)
+    return {"data": data, "summary": db.apple_health_summary(settings.database_path, day=day)}
 
 
 @app.post("/call")
