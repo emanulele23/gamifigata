@@ -1,99 +1,70 @@
-# Echo — Assistente vocale proattivo per salute e crescita
+# Echo — 3 passi, poi funziona da solo
 
-Echo **ti chiama 2-3 volte al giorno** (Telegram), ti fa **domande mirate** con voce naturale, **compila i dati per te** e tiene traccia di obiettivi, streak e Apple Salute — **senza aprire un’app ogni volta**.
+Echo è un assistente su **Telegram** che ti scrive **2-3 volte al giorno**, ti fa **una domanda semplice** (umore, cibo, movimento) e **salva tutto per te**. Rispondi a voce o a testo. Niente app da aprire ogni giorno.
 
-Pensato per **Raspberry Pi 5**: `git clone` → onboarding guidato → Docker.
-
-## Cosa fa (in pratica)
-
-| Momento | Echo ti chiede… | Salva |
-|---|---|---|
-| Mattina (~9:00) | Come hai dormito, come ti senti | umore, sonno |
-| Pranzo (~14:00) | Cosa hai mangiato, ti sei mosso | pasto, attività |
-| Sera (~21:00) | Giornata, umore, micro-vittorie | mood, habits, note |
-
-- **Voce umana** (Fish Audio) + **cervello** (DeepSeek)
-- **Gamification**: obiettivi personali, streak, celebrazioni brevi
-- **Apple Salute**: iPhone invia passi/esercizio via Shortcut (vedi [docs/apple-health-shortcut.md](docs/apple-health-shortcut.md))
-- **Zero sforzo manuale**: rispondi a voce o in chat, Echo estrae i dati
-
-## Prima installazione (consigliato)
+## Installazione (Raspberry Pi)
 
 ```bash
 git clone https://github.com/emanulele23/gamifigata.git echo
 cd echo
-git checkout cursor/echo-personal-agent-4b35
-
-python3 scripts/onboard.py   # wizard: nome, API key, obiettivi, orari, Apple Salute
-./scripts/setup.sh           # oppure: make up
+./scripts/setup.sh
 ```
 
-Il wizard ti chiede:
-- Nome e fuso orario
-- Token Telegram, API DeepSeek e Fish Audio
-- Orari check-in (default 09:00, 14:00, 21:00)
-- Se vuoi **chiamate/notifiche vocali**
-- Chi sei e cosa vuoi migliorare → Echo propone **micro-obiettivi** con l’AI
-- Collegamento **Apple Salute** (opzionale)
+Lo script avvia Echo e ti mostra un indirizzo tipo:
 
-## Dopo l’avvio
+**http://192.168.x.x:5000/setup**
 
-```bash
-make health      # stato + onboarding
-make checkin     # simula un check-in vocale adesso
-make logs
-```
+Apri quel link **dal telefono** (stessa Wi‑Fi), incolla le 3 chiavi API, salva.
 
-Scrivi al bot su Telegram: risponde con testo + nota vocale.
+## Configurazione su Telegram
 
-### Chiamate vocali (Fase 5)
+1. Crea un bot con [@BotFather](https://t.me/BotFather) → copia il **token**
+2. Registrati su [DeepSeek](https://platform.deepseek.com) → **API key**
+3. Registrati su [Fish Audio](https://fish.audio) → **API key** + voce clonata
 
-Con `ENABLE_VOICE_CALLS=true`, agli check-in Echo tenta una **consegna vocale via userbot Telegram** (nota vocale + opz. voice chat). Setup:
-
-```bash
-python3 scripts/login_userbot.py
-docker compose up -d --build
-```
-
-## Apple Salute
-
-La Raspi **non accede** direttamente a Salute. Un **Shortcut iPhone** manda passi e minuti esercizio a Echo. Guida: [docs/apple-health-shortcut.md](docs/apple-health-shortcut.md).
-
-## Architettura
+Poi apri Telegram, cerca il tuo bot e scrivi:
 
 ```
-iPhone (Shortcut Salute) ──POST──► echo-api ──► SQLite
-Telegram ◄── check-in vocali ── echo-api ──► DeepSeek + Fish Audio
-n8n (opzionale) ── cron ──► echo-api
+/start
 ```
 
-## API utili
+Echo ti chiede il nome, cosa vuoi migliorare, ti propone obiettivi. **Fine.**
 
-| Endpoint | Descrizione |
-|---|---|
-| `POST /checkin` | check-in vocale immediato |
-| `GET /profile` | profilo e orari |
-| `GET /goals` | obiettivi + streak |
-| `POST /integrations/apple-health` | dati da iPhone |
-| `GET /health` | stato sistema |
+## Cosa succede ogni giorno
 
-## Costi
+| Ora | Echo ti chiede |
+|-----|----------------|
+| ~9:00 | Come hai dormito, come ti senti |
+| ~14:00 | Cosa hai mangiato, ti sei mosso |
+| ~21:00 | Com'è andata la giornata |
 
-- DeepSeek + Fish Audio: pochi €/mese uso personale
-- Fish ASR per trascrizione (no Whisper/OpenAI, no GPU)
-- SQLite e n8n self-host: gratis
+Rispondi con un **messaggio vocale** o testo. Echo capisce, salva, e ti tiene la **streak** sugli obiettivi.
 
-## n8n (opzionale)
+Comandi utili su Telegram:
+- `/stato` — riepilogo
+- `/obiettivi` — obiettivi e streak
 
-Importa `n8n/workflows/A_promemoria.json`, `B_ricezione.json`, `C_chiamata.json`.  
-Se usi n8n per i cron, imposta `ENABLE_INTERNAL_REMINDERS=false`.
+## Apple Salute (opzionale)
 
-## Struttura
+L'iPhone può mandare passi e minuti di esercizio a Echo con un **Shortcut**. Guida: [docs/apple-health-shortcut.md](docs/apple-health-shortcut.md).
+
+In futuro potrai usare la stessa API da un'**app iOS** — vedi [docs/ios-api.md](docs/ios-api.md).
+
+## Domande frequenti
+
+**Devo usare n8n, Pyrogram o SSH?**  
+No. È tutto opzionale per utenti avanzati. Il percorso normale è: setup → pagina web → Telegram `/start`.
+
+**Quanto costa?**  
+DeepSeek + Fish Audio: pochi euro al mese per uso personale.
+
+**I miei dati dove stanno?**  
+Sul SQLite della tua Raspberry Pi, in casa tua.
+
+## Struttura semplice
 
 ```
-scripts/onboard.py      # wizard prima installazione
-scripts/setup.sh        # avvio Docker
-echo-api/               # backend FastAPI
-docs/apple-health-shortcut.md
-n8n/workflows/
+./scripts/setup.sh     ← unico comando installazione
+http://IP:5000/setup   ← inserisci chiavi API
+Telegram /start        ← configurazione personale
 ```

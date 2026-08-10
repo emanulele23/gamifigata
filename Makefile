@@ -22,7 +22,7 @@ health:
 checkin:
 	curl -sS -X POST http://localhost:5000/checkin \
 	  -H 'Content-Type: application/json' \
-	  -d '{"send": true, "try_call": true}' | python3 -m json.tool
+	  -d '{"send": true}' | python3 -m json.tool
 
 discover:
 	curl -sS http://localhost:5000/telegram/discover-chat | python3 -m json.tool

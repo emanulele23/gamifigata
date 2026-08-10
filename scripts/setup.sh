@@ -4,49 +4,42 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-echo "==> Echo setup (Raspberry Pi 5)"
+echo ""
+echo "  Echo — installazione guidata"
+echo "  ────────────────────────────"
+echo ""
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker non trovato. Installazione..."
+  echo "Installo Docker (serve una volta sola)..."
   curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
   sudo sh /tmp/get-docker.sh
-  sudo usermod -aG docker "$USER" || true
-  echo "Docker installato. Se è la prima volta, esci e rientra nella sessione (o riavvia) così il gruppo docker è attivo."
+  sudo usermod -aG docker "$USER" 2>/dev/null || true
+  echo ""
+  echo "Docker installato. Se è la prima volta, riavvia la sessione e rilancia questo script."
+  exit 0
 fi
 
-if ! docker compose version >/dev/null 2>&1; then
-  echo "ERRORE: 'docker compose' non disponibile. Aggiorna Docker."
-  exit 1
-fi
+mkdir -p echo-api/data
 
 if [[ ! -f .env ]]; then
-  echo "Manca .env — esegui prima la configurazione guidata:"
-  echo "  python3 scripts/onboard.py"
-  echo "Oppure: cp .env.example .env && nano .env"
-  exit 1
+  cp .env.example .env 2>/dev/null || touch .env
 fi
 
-missing=0
-for key in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID DEEPSEEK_API_KEY FISH_API_KEY; do
-  val="$(grep -E "^${key}=" .env | head -n1 | cut -d= -f2- || true)"
-  if [[ -z "${val}" ]]; then
-    echo "Manca ${key} in .env"
-    missing=1
-  fi
-done
-if [[ "$missing" -ne 0 ]]; then
-  echo "Compila .env e riesegui: ./scripts/setup.sh"
-  exit 1
-fi
-
-mkdir -p echo-api/data n8n_data
-echo "==> Avvio stack (n8n + echo-api)"
+echo "Avvio Echo..."
 docker compose up -d --build
 
-echo
-echo "Pronto."
-echo "  echo-api health: http://$(hostname -I | awk '{print $1}'):5000/health"
-echo "  n8n UI:          http://$(hostname -I | awk '{print $1}'):5678"
-echo
-echo "Importa i workflow da n8n/workflows/ nella UI n8n,"
-echo "oppure imposta STANDALONE_BOT=true in .env per usare solo echo-api."
+IP="$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")"
+
+echo ""
+echo "  Fatto!"
+echo ""
+echo "  Prossimo passo (dal telefono o PC, stessa rete Wi‑Fi):"
+echo ""
+echo "    http://${IP}:5000/setup"
+echo ""
+echo "  Inserisci le 3 chiavi API, poi apri Telegram e scrivi al tuo bot:"
+echo ""
+echo "    /start"
+echo ""
+echo "  Echo ti guiderà con domande semplici. Nient'altro da fare."
+echo ""

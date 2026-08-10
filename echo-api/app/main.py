@@ -10,14 +10,19 @@ from typing import Any, Dict, Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from zoneinfo import ZoneInfo
 
 from app import db
 from app.caller import place_call, shutdown_caller
-from app.config import get_settings
+from app.config import get_settings, reload_settings, write_secrets_file
 from app.fish import speech_to_text, text_to_speech
+from app.onboarding_flow import (
+    handle_onboarding_message,
+    needs_onboarding,
+    status_message,
+)
 from app.parsing import normalize_log_payload
 from app.service import (
     deliver_to_telegram,
@@ -76,8 +81,15 @@ class AppleHealthIn(BaseModel):
 
 class CheckinIn(BaseModel):
     send: bool = True
-    try_call: bool = True
+    try_call: bool = False
     hhmm: Optional[str] = None
+
+
+class SetupSaveIn(BaseModel):
+    telegram_bot_token: str
+    deepseek_api_key: str
+    fish_api_key: str
+    fish_reference_id: str = ""
 
 
 class ChatIn(BaseModel):
@@ -119,7 +131,7 @@ async def _scheduled_reminder() -> None:
         await run_checkin_pipeline(
             settings,
             send=True,
-            try_call=True,
+            try_call=False,
         )
     except Exception:  # noqa: BLE001
         logger.exception("Scheduled check-in failed")
@@ -131,13 +143,90 @@ def _scheduled_times(settings) -> list[str]:
     return [t for t in times if t]
 
 
+async def _handle_telegram_message(
+    settings,
+    message: dict,
+    chat_id: str,
+) -> None:
+    from app.telegram_bot import send_message
+
+    text = (message.get("text") or "").strip()
+    lower = text.lower()
+
+    if not settings.is_configured:
+        await send_message(
+            settings,
+            "Ciao! Echo non è ancora configurato.\n\n"
+            "Apri dal browser (stessa Wi‑Fi):\n"
+            f"{settings.echo_public_url}/setup\n\n"
+            "Inserisci le chiavi API e poi scrivimi /start",
+            chat_id=chat_id,
+        )
+        return
+
+    if lower in ("/stato", "/status"):
+        await send_message(settings, status_message(settings.database_path), chat_id=chat_id)
+        return
+
+    if lower in ("/obiettivi", "/goals"):
+        goals = db.list_goals(settings.database_path)
+        streaks = db.get_streaks(settings.database_path)
+        if not goals:
+            body = "Non hai ancora obiettivi. Scrivimi cosa vuoi migliorare!"
+        else:
+            lines = []
+            for g in goals:
+                st = next((s for s in streaks if s["goal_id"] == g["id"]), {})
+                lines.append(
+                    f"• {g['title']} — streak {st.get('current_streak') or 0} giorni"
+                )
+            body = "I tuoi obiettivi:\n" + "\n".join(lines)
+        await send_message(settings, body, chat_id=chat_id)
+        return
+
+    if needs_onboarding(settings.database_path):
+        handled, reply = await handle_onboarding_message(
+            settings, text or "/start", chat_id=chat_id
+        )
+        if handled:
+            await send_message(settings, reply, chat_id=chat_id)
+            return
+
+    if lower in ("/start", "/inizia"):
+        handled, reply = await handle_onboarding_message(
+            settings, text, chat_id=chat_id
+        )
+        if handled:
+            await send_message(settings, reply, chat_id=chat_id)
+            return
+
+    if message.get("voice") or message.get("audio"):
+        file_id = (message.get("voice") or message.get("audio"))["file_id"]
+        audio = await download_file(settings, file_id)
+        result = await handle_user_audio(
+            settings, audio, source="voice", chat_id=chat_id
+        )
+    elif text:
+        result = await handle_user_text(
+            settings, text, source="chat", chat_id=chat_id
+        )
+    else:
+        return
+
+    await deliver_to_telegram(
+        settings,
+        text=result["text"],
+        audio_path=result.get("audio_path"),
+        chat_id=chat_id,
+    )
+
+
 async def _standalone_poll_loop() -> None:
     settings = get_settings()
     offset: Optional[int] = None
-    logger.info("Standalone Telegram polling started")
+    logger.info("Telegram attivo — scrivi /start al bot")
     while True:
         try:
-            # Rileggi settings/chat_id a runtime (può essere auto-appreso)
             settings = get_settings()
             known = effective_chat_id(settings)
             updates = await get_updates(settings, offset=offset, timeout=25)
@@ -152,35 +241,11 @@ async def _standalone_poll_loop() -> None:
                 if known and chat_id != str(known):
                     continue
 
-                if message.get("voice") or message.get("audio"):
-                    file_id = (message.get("voice") or message.get("audio"))["file_id"]
-                    audio = await download_file(settings, file_id)
-                    result = await handle_user_audio(
-                        settings,
-                        audio,
-                        source="voice",
-                        chat_id=chat_id,
-                    )
-                elif message.get("text"):
-                    result = await handle_user_text(
-                        settings,
-                        message["text"],
-                        source="chat",
-                        chat_id=chat_id,
-                    )
-                else:
-                    continue
-
-                await deliver_to_telegram(
-                    settings,
-                    text=result["text"],
-                    audio_path=result.get("audio_path"),
-                    chat_id=chat_id,
-                )
+                await _handle_telegram_message(settings, message, chat_id)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
-            logger.exception("Polling loop error")
+            logger.exception("Errore Telegram")
             await asyncio.sleep(3)
 
 
@@ -231,7 +296,32 @@ async def lifespan(app: FastAPI):
     await shutdown_caller()
 
 
-app = FastAPI(title="Echo API", version="1.2.0", lifespan=lifespan)
+app = FastAPI(title="Echo API", version="2.0.0", lifespan=lifespan)
+
+SETUP_HTML = (Path(__file__).parent / "static" / "setup.html").read_text(encoding="utf-8")
+
+
+@app.get("/setup", response_class=HTMLResponse)
+async def setup_page() -> HTMLResponse:
+    return HTMLResponse(SETUP_HTML)
+
+
+@app.post("/setup/save")
+async def setup_save(body: SetupSaveIn) -> Dict[str, Any]:
+    settings = get_settings()
+    secrets_path = str(Path(settings.database_path).parent / "secrets.env")
+    write_secrets_file(
+        secrets_path,
+        telegram_bot_token=body.telegram_bot_token.strip(),
+        deepseek_api_key=body.deepseek_api_key.strip(),
+        fish_api_key=body.fish_api_key.strip(),
+        fish_reference_id=body.fish_reference_id.strip(),
+    )
+    reload_settings()
+    return {
+        "ok": True,
+        "message": "Configurazione salvata. Apri Telegram e scrivi /start al bot.",
+    }
 
 
 @app.get("/health")
@@ -241,12 +331,11 @@ async def health() -> Dict[str, Any]:
     return {
         "ok": True,
         "service": "echo-api",
-        "version": "1.2.0",
+        "version": "2.0.0",
+        "configured": settings.is_configured,
+        "setup_url": "/setup",
         "time": datetime.now(ZoneInfo(settings.tz)).isoformat(),
-        "standalone_bot": settings.standalone_bot,
-        "enable_voice_calls": settings.enable_voice_calls,
         "checkin_times": _scheduled_times(settings),
-        "chat_id": effective_chat_id(settings),
         "onboarding_complete": profile.get("onboarding_complete", False),
         "user_name": profile.get("name"),
     }

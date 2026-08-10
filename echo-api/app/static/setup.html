@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Echo — Configurazione</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 420px; margin: 0 auto; padding: 24px 16px;
+      background: #0f1419; color: #e7ecf3;
+    }
+    h1 { font-size: 1.5rem; margin: 0 0 8px; }
+    p { color: #9aa5b5; line-height: 1.5; font-size: 0.95rem; }
+    label { display: block; margin: 16px 0 6px; font-size: 0.9rem; }
+    input {
+      width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #2a3441;
+      background: #1a222d; color: #fff; font-size: 1rem;
+    }
+    button {
+      width: 100%; margin-top: 24px; padding: 14px; border: none; border-radius: 12px;
+      background: #3b82f6; color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; }
+    .ok { color: #4ade80; margin-top: 16px; }
+    .err { color: #f87171; margin-top: 16px; }
+    a { color: #60a5fa; }
+  </style>
+</head>
+<body>
+  <h1>Configura Echo</h1>
+  <p>Inserisci le chiavi API. Poi apri Telegram, scrivi al tuo bot <strong>/start</strong> e segui le istruzioni.</p>
+
+  <form id="f">
+    <label>Token bot Telegram (@BotFather)</label>
+    <input name="telegram_bot_token" required placeholder="123456:ABC...">
+
+    <label>Chiave DeepSeek</label>
+    <input name="deepseek_api_key" required placeholder="sk-...">
+
+    <label>Chiave Fish Audio (voce)</label>
+    <input name="fish_api_key" required placeholder="...">
+
+    <label>ID voce Fish (reference_id)</label>
+    <input name="fish_reference_id" placeholder="opzionale">
+
+    <button type="submit">Salva e continua su Telegram</button>
+  </form>
+  <p id="msg"></p>
+  <p style="margin-top:32px;font-size:0.85rem">
+    Dopo il salvataggio apri Telegram e scrivi <strong>/start</strong> al bot.
+  </p>
+
+  <script>
+    document.getElementById('f').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button');
+      const msg = document.getElementById('msg');
+      btn.disabled = true;
+      msg.textContent = 'Salvo…';
+      msg.className = '';
+      const data = Object.fromEntries(new FormData(e.target));
+      try {
+        const r = await fetch('/setup/save', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(data),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.detail || 'Errore');
+        msg.className = 'ok';
+        msg.textContent = 'Salvato! Ora apri Telegram e scrivi /start al tuo bot.';
+      } catch (err) {
+        msg.className = 'err';
+        msg.textContent = err.message;
+        btn.disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>
